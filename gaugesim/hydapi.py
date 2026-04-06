@@ -15,6 +15,7 @@ class SeriesQuery:
     station_id: str
     parameter: str
     version: str
+    resolution_time: int = 0
 
     @property
     def series_id(self) -> str:
@@ -62,6 +63,7 @@ def fetch_observations(
         "StationId": query.station_id,
         "Parameter": query.parameter,
         "Version": query.version,
+        "ResolutionTime": query.resolution_time,
         "ReferenceTime": f"{_as_utc(start_utc).isoformat()}/{_as_utc(end_utc).isoformat()}",
     }
     headers = {"X-API-Key": token}

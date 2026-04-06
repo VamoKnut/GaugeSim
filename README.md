@@ -4,7 +4,7 @@ Local web app simulator for hydrological gauging stations.
 
 ## Features
 
-- Fetches stage/discharge observations from NVE HydAPI for user-selected period.
+- Fetches stage/discharge observations from NVE HydAPI for user-selected period, including configurable `ResolutionTime` (default `0`).
 - Applies independent linear transforms (`y = aX + b`) to stage and discharge.
 - Crops to a base replay window by time and index.
 - Replays as fake realtime values to MQTT.

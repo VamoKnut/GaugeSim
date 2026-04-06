@@ -131,9 +131,10 @@ def main() -> None:
     station = c1.text_input("Station ID", value="")
     parameter_stage = c2.text_input("Stage parameter", value="waterlevel")
     parameter_dis = c3.text_input("Discharge parameter", value="discharge")
-    d1, d2 = st.columns(2)
+    d1, d2, d3 = st.columns(3)
     version_stage = d1.text_input("Stage version", value="1")
     version_dis = d2.text_input("Discharge version", value="1")
+    resolution_time = d3.number_input("ResolutionTime (API)", min_value=0, value=0, step=1)
 
     now_local = datetime.now(UI_TZ)
     default_start = now_local - timedelta(days=3)
@@ -146,13 +147,13 @@ def main() -> None:
     if st.button("Fetch data"):
         try:
             stage_df = fetch_observations(
-                SeriesQuery(station, parameter_stage, version_stage),
+                SeriesQuery(station, parameter_stage, version_stage, int(resolution_time)),
                 to_utc(start_local),
                 to_utc(end_local),
                 st.session_state["settings"].api_token,
             )
             dis_df = fetch_observations(
-                SeriesQuery(station, parameter_dis, version_dis),
+                SeriesQuery(station, parameter_dis, version_dis, int(resolution_time)),
                 to_utc(start_local),
                 to_utc(end_local),
                 st.session_state["settings"].api_token,
