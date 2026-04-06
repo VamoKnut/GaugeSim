@@ -41,6 +41,9 @@ def next_payload(
 ) -> tuple[dict | None, bool]:
     if not state.running:
         return None, False
+    if df.empty:
+        state.running = False
+        return None, False
 
     elapsed_real = simulated_elapsed_seconds(now, state)
     elapsed_series = elapsed_real * config.time_scale

@@ -339,6 +339,9 @@ def main() -> None:
     start_btn, pause_btn, reset_btn = st.columns(3)
 
     if start_btn.button("Start simulator") and not st.session_state["sim_running"]:
+        if st.session_state["cropped_df"] is None or st.session_state["cropped_df"].empty:
+            st.warning("Cropped dataset is empty. Adjust crop range before starting simulator.")
+            return
         st.session_state["sim_stop"] = threading.Event()
         st.session_state["sim_pause"] = threading.Event()
         mqtt = GaugeMqttPublisher(

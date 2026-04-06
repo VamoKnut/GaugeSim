@@ -23,3 +23,14 @@ def test_next_payload_stops_when_no_restart():
     assert payload is None
     assert restarted is False
     assert state.running is False
+
+
+def test_next_payload_stops_gracefully_on_empty_dataframe():
+    df = pd.DataFrame(columns=["timestamp", "stage", "discharge", "originalStage", "originalDischarge"])
+    cfg = SimulatorConfig(freq_seconds=1.0, time_scale=1.0, auto_restart=False)
+    state = RuntimeState(started_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
+
+    payload, restarted = next_payload(df, cfg, state, datetime(2026, 1, 1, 0, 0, 1, tzinfo=timezone.utc))
+    assert payload is None
+    assert restarted is False
+    assert state.running is False
