@@ -95,8 +95,11 @@ def build_plot(
         )
     )
 
+    x_min = df["timestamp"].min()
+    x_max = df["timestamp"].max()
+
     fig.update_layout(
-        xaxis=dict(title="Time", rangeslider=dict(visible=True)),
+        xaxis=dict(title="Time", range=[x_min, x_max]),
         yaxis=dict(title="Stage [meter]"),
         yaxis2=dict(title="Discharge [m3/s]", overlaying="y", side="right"),
         legend=dict(orientation="h"),
@@ -109,6 +112,7 @@ def build_plot(
         start, end = crop_bounds
         fig.add_vline(x=start, line_color="green", line_dash="dash")
         fig.add_vline(x=end, line_color="orange", line_dash="dash")
+        fig.add_vrect(x0=start, x1=end, fillcolor="LightGreen", opacity=0.12, line_width=0)
 
     return fig
 
@@ -305,15 +309,6 @@ def main() -> None:
     c_start, c_end = st.columns(2)
     c_start.datetime_input("Crop start (UTC+1)", key="crop_start_dt", on_change=sync_range_from_dates)
     c_end.datetime_input("Crop end (UTC+1)", key="crop_end_dt", on_change=sync_range_from_dates)
-    st.slider(
-        "Visual crop by date/time",
-        min_value=min_ts,
-        max_value=max_ts,
-        key="crop_dt_range",
-        step=timedelta(minutes=1),
-        on_change=sync_dates_from_range,
-    )
-
     crop_start = to_utc(st.session_state["crop_start_dt"])
     crop_end = to_utc(st.session_state["crop_end_dt"])
     cropped = crop_period(merged, crop_start, crop_end)
@@ -321,10 +316,18 @@ def main() -> None:
 
     st.plotly_chart(
         build_plot(
-            cropped,
+            merged,
             crop_bounds=(to_utc(st.session_state["crop_start_dt"]), to_utc(st.session_state["crop_end_dt"])),
         ),
         width="stretch",
+    )
+    st.slider(
+        "Visual crop by date/time",
+        min_value=min_ts,
+        max_value=max_ts,
+        key="crop_dt_range",
+        step=timedelta(minutes=1),
+        on_change=sync_dates_from_range,
     )
 
     st.header("3) Simulator")
