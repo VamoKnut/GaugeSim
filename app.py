@@ -15,7 +15,7 @@ from gaugesim.config import AppSettings, load_settings, save_settings
 from gaugesim.hydapi import HydApiError, SeriesQuery, fetch_observations
 from gaugesim.mqtt_client import GaugeMqttPublisher, MqttSettings
 from gaugesim.simulator import RuntimeState, SimulatorConfig, next_payload
-from gaugesim.timeseries import Transform, align_and_transform
+from gaugesim.timeseries import Transform, align_and_transform, crop_period
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -254,56 +254,48 @@ def main() -> None:
     min_ts = merged["timestamp"].iloc[0].to_pydatetime().astimezone(UI_TZ)
     max_ts = merged["timestamp"].iloc[-1].to_pydatetime().astimezone(UI_TZ)
 
-    timeline = list(merged["timestamp"])
-    max_idx = max(len(merged) - 1, 1)
-
-    if "crop_idx_range" not in st.session_state:
-        st.session_state["crop_idx_range"] = (0, max_idx)
+    if "crop_dt_range" not in st.session_state:
+        st.session_state["crop_dt_range"] = (min_ts, max_ts)
     if "crop_start_dt" not in st.session_state:
         st.session_state["crop_start_dt"] = min_ts
     if "crop_end_dt" not in st.session_state:
         st.session_state["crop_end_dt"] = max_ts
 
-    # reset invalid ranges if dataset changed
-    current_start, current_end = st.session_state["crop_idx_range"]
-    if current_end > max_idx:
-        st.session_state["crop_idx_range"] = (0, max_idx)
+    current_range = st.session_state["crop_dt_range"]
+    if current_range[0] < min_ts or current_range[1] > max_ts:
+        st.session_state["crop_dt_range"] = (min_ts, max_ts)
         st.session_state["crop_start_dt"] = min_ts
         st.session_state["crop_end_dt"] = max_ts
 
-    def sync_dates_from_index() -> None:
-        s_idx, e_idx = st.session_state["crop_idx_range"]
-        st.session_state["crop_start_dt"] = timeline[s_idx].to_pydatetime().astimezone(UI_TZ)
-        st.session_state["crop_end_dt"] = timeline[e_idx].to_pydatetime().astimezone(UI_TZ)
+    def sync_range_from_dates() -> None:
+        start = st.session_state["crop_start_dt"]
+        end = st.session_state["crop_end_dt"]
+        if start > end:
+            start, end = end, start
+            st.session_state["crop_start_dt"] = start
+            st.session_state["crop_end_dt"] = end
+        st.session_state["crop_dt_range"] = (start, end)
 
-    def sync_index_from_dates() -> None:
-        start_utc = to_utc(st.session_state["crop_start_dt"])
-        end_utc = to_utc(st.session_state["crop_end_dt"])
-        if start_utc > end_utc:
-            start_utc, end_utc = end_utc, start_utc
-            st.session_state["crop_start_dt"] = start_utc.astimezone(UI_TZ)
-            st.session_state["crop_end_dt"] = end_utc.astimezone(UI_TZ)
-
-        ts_series = merged["timestamp"]
-        start_idx = int(ts_series.searchsorted(pd.Timestamp(start_utc), side="left"))
-        end_idx = int(ts_series.searchsorted(pd.Timestamp(end_utc), side="right") - 1)
-        start_idx = max(0, min(start_idx, max_idx))
-        end_idx = max(start_idx, min(end_idx, max_idx))
-        st.session_state["crop_idx_range"] = (start_idx, end_idx)
+    def sync_dates_from_range() -> None:
+        start, end = st.session_state["crop_dt_range"]
+        st.session_state["crop_start_dt"] = start
+        st.session_state["crop_end_dt"] = end
 
     c_start, c_end = st.columns(2)
-    c_start.datetime_input("Crop start (UTC+1)", key="crop_start_dt", on_change=sync_index_from_dates)
-    c_end.datetime_input("Crop end (UTC+1)", key="crop_end_dt", on_change=sync_index_from_dates)
+    c_start.datetime_input("Crop start (UTC+1)", key="crop_start_dt", on_change=sync_range_from_dates)
+    c_end.datetime_input("Crop end (UTC+1)", key="crop_end_dt", on_change=sync_range_from_dates)
     st.slider(
-        "Visual crop by sample index",
-        min_value=0,
-        max_value=max_idx,
-        key="crop_idx_range",
-        on_change=sync_dates_from_index,
+        "Visual crop by date/time",
+        min_value=min_ts,
+        max_value=max_ts,
+        key="crop_dt_range",
+        step=timedelta(minutes=1),
+        on_change=sync_dates_from_range,
     )
 
-    idx_start, idx_end = st.session_state["crop_idx_range"]
-    cropped = merged.iloc[idx_start : idx_end + 1].reset_index(drop=True)
+    crop_start = to_utc(st.session_state["crop_start_dt"])
+    crop_end = to_utc(st.session_state["crop_end_dt"])
+    cropped = crop_period(merged, crop_start, crop_end)
     st.session_state["cropped_df"] = cropped
 
     st.plotly_chart(build_plot(cropped), width="stretch")
