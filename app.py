@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from datetime import datetime, timedelta, timezone
@@ -14,6 +15,8 @@ from gaugesim.hydapi import HydApiError, SeriesQuery, fetch_observations
 from gaugesim.mqtt_client import GaugeMqttPublisher, MqttSettings
 from gaugesim.simulator import RuntimeState, SimulatorConfig, next_payload
 from gaugesim.timeseries import Transform, align_and_transform, crop_period
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 UI_TZ = timezone(timedelta(hours=1))
 

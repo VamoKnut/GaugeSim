@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import threading
 import time
 from dataclasses import dataclass
 
 import paho.mqtt.client as mqtt
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -32,9 +35,13 @@ class GaugeMqttPublisher:
 
     def _on_connect(self, client: mqtt.Client, userdata, flags, reason_code, properties=None) -> None:
         if reason_code == 0:
+            logger.info("MQTT connected to %s:%s", self._settings.host, self._settings.port)
             self._connected.set()
+        else:
+            logger.warning("MQTT connect returned non-zero reason code: %s", reason_code)
 
     def _on_disconnect(self, client: mqtt.Client, userdata, disconnect_flags, reason_code, properties=None) -> None:
+        logger.warning("MQTT disconnected (reason_code=%s)", reason_code)
         self._connected.clear()
 
     def connect(self) -> None:
@@ -45,8 +52,8 @@ class GaugeMqttPublisher:
         while not self._connected.is_set() and not self._stop_retry.is_set():
             try:
                 self._client.connect(self._settings.host, self._settings.port, keepalive=60)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("MQTT connect retry failed: %s", exc)
             self._connected.wait(timeout=2)
             if self._connected.is_set():
                 break
@@ -54,11 +61,15 @@ class GaugeMqttPublisher:
 
     def publish_sample(self, payload: dict) -> None:
         self._ensure_connected()
-        self._client.publish("gaugsim/sample", json.dumps(payload), qos=0, retain=False)
+        payload_json = json.dumps(payload)
+        logger.info("MQTT -> gaugsim/sample %s", payload_json)
+        self._client.publish("gaugsim/sample", payload_json, qos=0, retain=False)
 
     def publish_status(self, status: str) -> None:
         self._ensure_connected()
-        self._client.publish("gaugsim/status", json.dumps({"status": status}), qos=0, retain=False)
+        payload_json = json.dumps({"status": status})
+        logger.info("MQTT -> gaugsim/status %s", payload_json)
+        self._client.publish("gaugsim/status", payload_json, qos=0, retain=False)
 
     def _ensure_connected(self) -> None:
         if not self._connected.is_set():
