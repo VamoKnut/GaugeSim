@@ -39,15 +39,39 @@ def to_utc(dt_local: datetime) -> datetime:
     return dt_local.astimezone(timezone.utc)
 
 
+def parse_series_id(series_id: str) -> tuple[str, str, str]:
+    parts = series_id.strip().rsplit(".", 2)
+    if len(parts) != 3 or any(not p for p in parts):
+        raise ValueError("Series ID must be on the form <stationID>.<param>.<version>")
+    return parts[0], parts[1], parts[2]
+
+
 def build_plot(df: pd.DataFrame, cursor_timestamp: datetime | None = None) -> go.Figure:
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df["timestamp"], y=df["stage"], mode="lines", name="Stage"))
-    fig.add_trace(go.Scatter(x=df["timestamp"], y=df["discharge"], mode="lines", name="Discharge", yaxis="y2"))
+    fig.add_trace(
+        go.Scatter(
+            x=df["timestamp"],
+            y=df["stage"],
+            mode="lines",
+            name="Stage",
+            line=dict(color="blue"),
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=df["timestamp"],
+            y=df["discharge"],
+            mode="lines",
+            name="Discharge",
+            yaxis="y2",
+            line=dict(color="red"),
+        )
+    )
 
     fig.update_layout(
         xaxis=dict(title="Time", rangeslider=dict(visible=True)),
-        yaxis=dict(title="Stage"),
-        yaxis2=dict(title="Discharge", overlaying="y", side="right"),
+        yaxis=dict(title="Stage [meter]"),
+        yaxis2=dict(title="Discharge [m3/s]", overlaying="y", side="right"),
         legend=dict(orientation="h"),
         margin=dict(l=30, r=30, t=20, b=20),
     )
@@ -139,14 +163,18 @@ def main() -> None:
             st.success("Settings saved")
 
     st.header("1) Retrieve source data")
-    c1, c2, c3 = st.columns(3)
-    station = c1.text_input("Station ID", value="")
-    parameter_stage = c2.text_input("Stage parameter", value="waterlevel")
-    parameter_dis = c3.text_input("Discharge parameter", value="discharge")
-    d1, d2, d3 = st.columns(3)
-    version_stage = d1.text_input("Stage version", value="1")
-    version_dis = d2.text_input("Discharge version", value="1")
-    resolution_time = d3.number_input("ResolutionTime (API)", min_value=0, value=0, step=1)
+    c1, c2 = st.columns(2)
+    stage_series_id = c1.text_input(
+        "Stage serie:",
+        value=settings.stage_series_id or "",
+        placeholder="stationID.param.version",
+    )
+    discharge_series_id = c2.text_input(
+        "Discharge serie:",
+        value=settings.discharge_series_id or "",
+        placeholder="stationID.param.version",
+    )
+    resolution_time = st.number_input("ResolutionTime (API)", min_value=0, value=0, step=1)
 
     now_local = datetime.now(UI_TZ)
     default_start = now_local - timedelta(days=3)
@@ -158,14 +186,16 @@ def main() -> None:
 
     if st.button("Fetch data"):
         try:
+            stage_station, stage_param, stage_version = parse_series_id(stage_series_id)
+            dis_station, dis_param, dis_version = parse_series_id(discharge_series_id)
             stage_df = fetch_observations(
-                SeriesQuery(station, parameter_stage, version_stage, int(resolution_time)),
+                SeriesQuery(stage_station, stage_param, stage_version, int(resolution_time)),
                 to_utc(start_local),
                 to_utc(end_local),
                 st.session_state["settings"].api_token,
             )
             dis_df = fetch_observations(
-                SeriesQuery(station, parameter_dis, version_dis, int(resolution_time)),
+                SeriesQuery(dis_station, dis_param, dis_version, int(resolution_time)),
                 to_utc(start_local),
                 to_utc(end_local),
                 st.session_state["settings"].api_token,
@@ -173,8 +203,11 @@ def main() -> None:
 
             st.session_state["stage_df"] = stage_df
             st.session_state["dis_df"] = dis_df
+            st.session_state["settings"].stage_series_id = stage_series_id.strip()
+            st.session_state["settings"].discharge_series_id = discharge_series_id.strip()
+            save_settings(st.session_state["settings"])
             st.success(f"Fetched stage={len(stage_df)} samples, discharge={len(dis_df)} samples")
-        except HydApiError as exc:
+        except (HydApiError, ValueError) as exc:
             st.error(str(exc))
 
     if st.session_state["stage_df"] is None or st.session_state["dis_df"] is None:
@@ -184,9 +217,9 @@ def main() -> None:
     st.header("2) Transform and crop")
     t1, t2, t3, t4 = st.columns(4)
     a_stage = t1.number_input("Stage scale a", value=1.0)
-    b_stage = t2.number_input("Stage offset b", value=0.0)
+    b_stage = t2.number_input("Stage offset b [meter]", value=0.0)
     a_dis = t3.number_input("Discharge scale a", value=1.0)
-    b_dis = t4.number_input("Discharge offset b", value=0.0)
+    b_dis = t4.number_input("Discharge offset b [m3/s]", value=0.0)
 
     merged = align_and_transform(
         st.session_state["stage_df"],
@@ -213,7 +246,7 @@ def main() -> None:
 
     st.header("3) Simulator")
     s1, s2, s3 = st.columns(3)
-    freq_sec = s1.number_input("Publish frequency (seconds)", min_value=1.0, max_value=3600.0, value=5.0)
+    freq_sec = s1.number_input("Publish frequency (seconds)", min_value=1, max_value=3600, value=5, step=1)
     time_scale = s2.number_input("Time scaling factor", min_value=0.1, max_value=1000.0, value=1.0)
     auto_restart = s3.checkbox("Auto restart at end", value=True)
 
@@ -234,7 +267,7 @@ def main() -> None:
         mqtt.connect()
         st.session_state["mqtt"] = mqtt
 
-        sim_cfg = SimulatorConfig(freq_seconds=float(freq_sec), time_scale=float(time_scale), auto_restart=bool(auto_restart))
+        sim_cfg = SimulatorConfig(freq_seconds=int(freq_sec), time_scale=float(time_scale), auto_restart=bool(auto_restart))
 
         runtime_data = {"latest_payload": None, "running": True}
         st.session_state["runtime_data"] = runtime_data
@@ -273,10 +306,12 @@ def main() -> None:
     if payload:
         st.subheader("Current output")
         n1, n2, n3, n4 = st.columns(4)
-        n1.metric("Stage", f"{payload['stage']:.3f}")
-        n2.metric("Discharge", f"{payload['discharge']:.3f}")
-        n3.metric("Original stage", f"{payload['originalStage']:.3f}")
-        n4.metric("Original discharge", f"{payload['originalDischarge']:.3f}")
+        n1.metric("Stage [meter]", f"{payload['stage']:.3f}")
+        n2.metric("Discharge [m3/s]", f"{payload['discharge']:.3f}")
+        n3.metric("Original stage [meter]", f"{payload['originalStage']:.3f}")
+        n4.metric("Original discharge [m3/s]", f"{payload['originalDischarge']:.3f}")
+        original_ts = pd.to_datetime(payload["originalTimestamp"]).strftime("%Y-%m-%d %H:%M")
+        st.caption(f"Original timestamp: {original_ts}")
 
         cursor = pd.to_datetime(payload["originalTimestamp"])
         st.plotly_chart(build_plot(st.session_state["cropped_df"], cursor_timestamp=cursor), width="stretch")

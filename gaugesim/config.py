@@ -15,6 +15,8 @@ class AppSettings:
     mqtt_username: str = ""
     mqtt_password: str = ""
     mqtt_tls: bool = False
+    stage_series_id: str = ""
+    discharge_series_id: str = ""
 
 
 DEFAULT_SETTINGS = AppSettings(
@@ -36,6 +38,8 @@ def load_settings(path: Path = CONFIG_PATH) -> AppSettings:
             mqtt_username=payload.get("mqtt_username", ""),
             mqtt_password=payload.get("mqtt_password", ""),
             mqtt_tls=bool(payload.get("mqtt_tls", False)),
+            stage_series_id=payload.get("stage_series_id", ""),
+            discharge_series_id=payload.get("discharge_series_id", ""),
         )
     except (json.JSONDecodeError, OSError, ValueError, TypeError):
         return DEFAULT_SETTINGS
