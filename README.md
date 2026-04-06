@@ -5,6 +5,7 @@ Local web app simulator for hydrological gauging stations.
 ## Features
 
 - Fetches stage/discharge observations from NVE HydAPI for user-selected period, including configurable `ResolutionTime` (default `0`).
+- Can also generate synthetic V-weir datasets from start/end window, resolution, and triangular stage parameters (offset + amplitude).
 - Uses stage/discharge source fields on the form `<stationID>.<param>.<version>` and persists these serie IDs between runs.
 - Applies independent linear transforms (`y = aX + b`) to stage and discharge.
 - Crops to a base replay window by time and index.

@@ -5,6 +5,7 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -47,6 +48,46 @@ def parse_series_id(series_id: str) -> tuple[str, str, str]:
     if len(parts) != 3 or any(not p for p in parts):
         raise ValueError("Series ID must be on the form <stationID>.<param>.<version>")
     return parts[0], parts[1], parts[2]
+
+
+def generate_synthetic_vweir(
+    start_local: datetime,
+    end_local: datetime,
+    resolution_minutes: int,
+    stage_offset: float,
+    stage_amplitude: float,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    if resolution_minutes <= 0:
+        raise ValueError("ResolutionTime must be greater than zero for synthetic data generation.")
+    if end_local <= start_local:
+        raise ValueError("End time must be after start time.")
+
+    # Work in UTC+1 wall-clock for generation, then convert to UTC for internal use.
+    start_naive = start_local.replace(tzinfo=None) if start_local.tzinfo else start_local
+    end_naive = end_local.replace(tzinfo=None) if end_local.tzinfo else end_local
+    ts_local = pd.date_range(start=start_naive, end=end_naive, freq=f"{resolution_minutes}min")
+    if len(ts_local) < 2:
+        raise ValueError("Selected period and resolution produce too few samples.")
+
+    n = len(ts_local)
+    phase = pd.Series(range(n), dtype=float) / (n - 1)
+    triangle = 1.0 - (2.0 * (phase - 0.5)).abs()
+    stage_values = stage_offset + stage_amplitude * triangle
+
+    # 90° V-weir equation: Q = (8/15) * Cd * sqrt(2g) * tan(theta/2) * H^(5/2)
+    # theta=90°, Cd~0.62, H is head above crest. Use crest at stage_offset.
+    g = 9.81
+    cd = 0.62
+    theta_half = 45.0
+    tan_theta_half = np.tan(np.deg2rad(theta_half))
+    k = (8.0 / 15.0) * cd * (2.0 * g) ** 0.5 * tan_theta_half
+    head = (stage_values - stage_offset).clip(lower=0.0)
+    discharge_values = k * (head ** 2.5)
+
+    ts_utc = pd.to_datetime(ts_local).tz_localize(UI_TZ).tz_convert(timezone.utc)
+    stage_df = pd.DataFrame({"timestamp": ts_utc, "value": stage_values.astype(float)})
+    discharge_df = pd.DataFrame({"timestamp": ts_utc, "value": discharge_values.astype(float)})
+    return stage_df, discharge_df
 
 
 def disable_dashlane_autofill() -> None:
@@ -210,7 +251,10 @@ def main() -> None:
         value=settings.discharge_series_id or "",
         placeholder="stationID.param.version",
     )
-    resolution_time = st.number_input("ResolutionTime (API)", min_value=0, value=0, step=1)
+    resolution_time = st.number_input("ResolutionTime [minutes]", min_value=0, value=0, step=1)
+    syn1, syn2 = st.columns(2)
+    synthetic_offset = syn1.number_input("Synthetic stage offset [meter]", value=0.2)
+    synthetic_amplitude = syn2.number_input("Synthetic stage amplitude [meter]", min_value=0.0, value=0.8)
 
     now_local = datetime.now(UI_TZ)
     default_start = now_local - timedelta(days=3)
@@ -220,7 +264,8 @@ def main() -> None:
     start_local = col_s.datetime_input("Start time (UTC+1)", value=default_start)
     end_local = col_e.datetime_input("End time (UTC+1)", value=default_end)
 
-    if st.button("Fetch data"):
+    btn_api, btn_syn = st.columns(2)
+    if btn_api.button("Get data from HydAPI"):
         try:
             stage_station, stage_param, stage_version = parse_series_id(stage_series_id)
             dis_station, dis_param, dis_version = parse_series_id(discharge_series_id)
@@ -244,6 +289,21 @@ def main() -> None:
             save_settings(st.session_state["settings"])
             st.success(f"Fetched stage={len(stage_df)} samples, discharge={len(dis_df)} samples")
         except (HydApiError, ValueError) as exc:
+            st.error(str(exc))
+
+    if btn_syn.button("Syntetic V-weir"):
+        try:
+            stage_df, dis_df = generate_synthetic_vweir(
+                start_local=start_local,
+                end_local=end_local,
+                resolution_minutes=int(resolution_time),
+                stage_offset=float(synthetic_offset),
+                stage_amplitude=float(synthetic_amplitude),
+            )
+            st.session_state["stage_df"] = stage_df
+            st.session_state["dis_df"] = dis_df
+            st.success(f"Generated synthetic stage={len(stage_df)} samples, discharge={len(dis_df)} samples")
+        except ValueError as exc:
             st.error(str(exc))
 
     if st.session_state["stage_df"] is None or st.session_state["dis_df"] is None:
