@@ -47,7 +47,11 @@ class GaugeMqttPublisher:
             logger.warning("MQTT connect returned non-zero reason code: %s", reason_code)
 
     def _on_disconnect(self, client: mqtt.Client, userdata, disconnect_flags, reason_code, properties=None) -> None:
-        logger.warning("MQTT disconnected (reason_code=%s)", reason_code)
+        reason_text = str(reason_code)
+        if "Normal disconnection" in reason_text:
+            logger.info("MQTT disconnected (reason_code=%s)", reason_code)
+        else:
+            logger.warning("MQTT disconnected (reason_code=%s)", reason_code)
         self._connected.clear()
 
     def connect(self) -> None:

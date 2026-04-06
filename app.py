@@ -30,7 +30,7 @@ def init_state() -> None:
     st.session_state.setdefault("sim_thread", None)
     st.session_state.setdefault("sim_stop", threading.Event())
     st.session_state.setdefault("sim_pause", threading.Event())
-    st.session_state.setdefault("latest_payload", None)
+    st.session_state.setdefault("runtime_data", {"latest_payload": None, "running": False})
     st.session_state.setdefault("mqtt", None)
     st.session_state.setdefault("sim_running", False)
 
@@ -58,13 +58,20 @@ def build_plot(df: pd.DataFrame, cursor_timestamp: datetime | None = None) -> go
     return fig
 
 
-def run_simulation_loop(df: pd.DataFrame, sim_cfg: SimulatorConfig) -> None:
-    mqtt = st.session_state["mqtt"]
+def run_simulation_loop(
+    df: pd.DataFrame,
+    sim_cfg: SimulatorConfig,
+    mqtt: GaugeMqttPublisher,
+    stop_event: threading.Event,
+    pause_event: threading.Event,
+    runtime_data: dict,
+) -> None:
     state = RuntimeState(started_at=datetime.now(timezone.utc), paused=False, running=True)
+    runtime_data["running"] = True
     mqtt.publish_status("SimulationStarted")
 
-    while not st.session_state["sim_stop"].is_set():
-        if st.session_state["sim_pause"].is_set():
+    while not stop_event.is_set():
+        if pause_event.is_set():
             if not state.paused:
                 state.paused = True
                 state.pause_started_at = datetime.now(timezone.utc)
@@ -80,18 +87,18 @@ def run_simulation_loop(df: pd.DataFrame, sim_cfg: SimulatorConfig) -> None:
         payload, restarted = next_payload(df, sim_cfg, state, datetime.now(timezone.utc))
         if payload is None:
             mqtt.publish_status("SimulationStopped")
-            st.session_state["sim_running"] = False
+            runtime_data["running"] = False
             return
 
         mqtt.publish_sample(payload)
-        st.session_state["latest_payload"] = payload
+        runtime_data["latest_payload"] = payload
         if restarted:
             mqtt.publish_status("SimulationRestart")
 
         time.sleep(sim_cfg.freq_seconds)
 
     mqtt.publish_status("SimulationStopped")
-    st.session_state["sim_running"] = False
+    runtime_data["running"] = False
 
 
 def stop_simulation() -> None:
@@ -101,6 +108,8 @@ def stop_simulation() -> None:
         thr.join(timeout=2)
     st.session_state["sim_thread"] = None
     st.session_state["sim_running"] = False
+    if "runtime_data" in st.session_state:
+        st.session_state["runtime_data"]["running"] = False
 
 
 def main() -> None:
@@ -200,7 +209,7 @@ def main() -> None:
     cropped = cropped_by_time.iloc[idx_start : idx_end + 1].reset_index(drop=True)
     st.session_state["cropped_df"] = cropped
 
-    st.plotly_chart(build_plot(cropped), use_container_width=True)
+    st.plotly_chart(build_plot(cropped), width="stretch")
 
     st.header("3) Simulator")
     s1, s2, s3 = st.columns(3)
@@ -227,7 +236,13 @@ def main() -> None:
 
         sim_cfg = SimulatorConfig(freq_seconds=float(freq_sec), time_scale=float(time_scale), auto_restart=bool(auto_restart))
 
-        thr = threading.Thread(target=run_simulation_loop, args=(st.session_state["cropped_df"], sim_cfg), daemon=True)
+        runtime_data = {"latest_payload": None, "running": True}
+        st.session_state["runtime_data"] = runtime_data
+        thr = threading.Thread(
+            target=run_simulation_loop,
+            args=(st.session_state["cropped_df"], sim_cfg, mqtt, st.session_state["sim_stop"], st.session_state["sim_pause"], runtime_data),
+            daemon=True,
+        )
         st.session_state["sim_thread"] = thr
         st.session_state["sim_running"] = True
         thr.start()
@@ -243,7 +258,10 @@ def main() -> None:
         if st.session_state.get("mqtt"):
             st.session_state["mqtt"].close()
             st.session_state["mqtt"] = None
-        st.session_state["latest_payload"] = None
+        st.session_state["runtime_data"] = {"latest_payload": None, "running": False}
+
+    runtime_data = st.session_state.get("runtime_data", {"latest_payload": None, "running": False})
+    st.session_state["sim_running"] = bool(runtime_data.get("running", False))
 
     if st.session_state["sim_running"]:
         st_autorefresh(interval=1000, key="sim-refresh")
@@ -251,7 +269,7 @@ def main() -> None:
     else:
         st.info("Simulator idle")
 
-    payload = st.session_state.get("latest_payload")
+    payload = runtime_data.get("latest_payload")
     if payload:
         st.subheader("Current output")
         n1, n2, n3, n4 = st.columns(4)
@@ -261,7 +279,7 @@ def main() -> None:
         n4.metric("Original discharge", f"{payload['originalDischarge']:.3f}")
 
         cursor = pd.to_datetime(payload["originalTimestamp"])
-        st.plotly_chart(build_plot(st.session_state["cropped_df"], cursor_timestamp=cursor), use_container_width=True)
+        st.plotly_chart(build_plot(st.session_state["cropped_df"], cursor_timestamp=cursor), width="stretch")
         st.json(payload)
 
 
