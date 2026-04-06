@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gaugesim"
+version = "0.1.0"
+description = "Hydrological gauging station simulator"
+requires-python = ">=3.10"
+dependencies = [
+  "streamlit>=1.40",
+  "pandas>=2.0",
+  "numpy>=1.26",
+  "requests>=2.31",
+  "paho-mqtt>=2.1",
+  "plotly>=5.20",
+  "streamlit-autorefresh>=1.0",
+  "python-dateutil>=2.9"
+]
+
+[tool.setuptools.packages.find]
+include = ["gaugesim*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
