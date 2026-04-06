@@ -23,9 +23,15 @@ class MqttSettings:
 class GaugeMqttPublisher:
     def __init__(self, settings: MqttSettings) -> None:
         self._settings = settings
-        self._client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
-        if settings.username:
+        self._client = mqtt.Client(
+            callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
+            protocol=mqtt.MQTTv5,
+        )
+        if settings.username.strip():
             self._client.username_pw_set(settings.username, settings.password)
+            logger.info("MQTT auth: username/password enabled")
+        else:
+            logger.info("MQTT auth: anonymous connection (no username)")
         if settings.tls:
             self._client.tls_set()
         self._connected = threading.Event()
