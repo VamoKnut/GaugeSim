@@ -37,6 +37,8 @@ def init_state() -> None:
 
 
 def to_utc(dt_local: datetime) -> datetime:
+    if dt_local.tzinfo is None:
+        dt_local = dt_local.replace(tzinfo=UI_TZ)
     return dt_local.astimezone(timezone.utc)
 
 
@@ -67,7 +69,11 @@ def disable_dashlane_autofill() -> None:
     )
 
 
-def build_plot(df: pd.DataFrame, cursor_timestamp: datetime | None = None) -> go.Figure:
+def build_plot(
+    df: pd.DataFrame,
+    cursor_timestamp: datetime | None = None,
+    crop_bounds: tuple[datetime, datetime] | None = None,
+) -> go.Figure:
     fig = go.Figure()
     fig.add_trace(
         go.Scatter(
@@ -99,6 +105,10 @@ def build_plot(df: pd.DataFrame, cursor_timestamp: datetime | None = None) -> go
 
     if cursor_timestamp is not None:
         fig.add_vline(x=cursor_timestamp, line_color="red", line_dash="dot")
+    if crop_bounds is not None:
+        start, end = crop_bounds
+        fig.add_vline(x=start, line_color="green", line_dash="dash")
+        fig.add_vline(x=end, line_color="orange", line_dash="dash")
 
     return fig
 
@@ -251,8 +261,8 @@ def main() -> None:
     )
     st.session_state["merged_df"] = merged
 
-    min_ts = merged["timestamp"].iloc[0].to_pydatetime().astimezone(UI_TZ)
-    max_ts = merged["timestamp"].iloc[-1].to_pydatetime().astimezone(UI_TZ)
+    min_ts = merged["timestamp"].iloc[0].to_pydatetime().astimezone(UI_TZ).replace(tzinfo=None)
+    max_ts = merged["timestamp"].iloc[-1].to_pydatetime().astimezone(UI_TZ).replace(tzinfo=None)
 
     if "crop_dt_range" not in st.session_state:
         st.session_state["crop_dt_range"] = (min_ts, max_ts)
@@ -260,6 +270,17 @@ def main() -> None:
         st.session_state["crop_start_dt"] = min_ts
     if "crop_end_dt" not in st.session_state:
         st.session_state["crop_end_dt"] = max_ts
+
+    # normalize any previously persisted aware datetimes into naive UTC+1 wall clock for widgets
+    if st.session_state["crop_start_dt"].tzinfo is not None:
+        st.session_state["crop_start_dt"] = st.session_state["crop_start_dt"].astimezone(UI_TZ).replace(tzinfo=None)
+    if st.session_state["crop_end_dt"].tzinfo is not None:
+        st.session_state["crop_end_dt"] = st.session_state["crop_end_dt"].astimezone(UI_TZ).replace(tzinfo=None)
+    range_start, range_end = st.session_state["crop_dt_range"]
+    if range_start.tzinfo is not None or range_end.tzinfo is not None:
+        range_start = range_start.astimezone(UI_TZ).replace(tzinfo=None)
+        range_end = range_end.astimezone(UI_TZ).replace(tzinfo=None)
+        st.session_state["crop_dt_range"] = (range_start, range_end)
 
     current_range = st.session_state["crop_dt_range"]
     if current_range[0] < min_ts or current_range[1] > max_ts:
@@ -298,7 +319,13 @@ def main() -> None:
     cropped = crop_period(merged, crop_start, crop_end)
     st.session_state["cropped_df"] = cropped
 
-    st.plotly_chart(build_plot(cropped), width="stretch")
+    st.plotly_chart(
+        build_plot(
+            cropped,
+            crop_bounds=(to_utc(st.session_state["crop_start_dt"]), to_utc(st.session_state["crop_end_dt"])),
+        ),
+        width="stretch",
+    )
 
     st.header("3) Simulator")
     s1, s2, s3 = st.columns(3)
@@ -370,7 +397,14 @@ def main() -> None:
         st.caption(f"Original timestamp: {original_ts}")
 
         cursor = pd.to_datetime(payload["originalTimestamp"])
-        st.plotly_chart(build_plot(st.session_state["cropped_df"], cursor_timestamp=cursor), width="stretch")
+        st.plotly_chart(
+            build_plot(
+                st.session_state["cropped_df"],
+                cursor_timestamp=cursor,
+                crop_bounds=(to_utc(st.session_state["crop_start_dt"]), to_utc(st.session_state["crop_end_dt"])),
+            ),
+            width="stretch",
+        )
         st.json(payload)
 
 
