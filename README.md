@@ -20,6 +20,19 @@ python -m pip install -e .
 streamlit run app.py
 ```
 
+## Docker
+
+```bash
+docker build -t gaugesim:latest .
+docker run --rm -p 8501:8501 gaugesim:latest
+```
+
+Or with compose:
+
+```bash
+docker compose up --build
+```
+
 ## Notes
 
 - UI uses UTC+1; API calls are converted to UTC.
